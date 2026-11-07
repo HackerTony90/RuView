@@ -18,6 +18,14 @@
 import { API_TOKEN_STORAGE_KEY } from './api.service.js';
 
 function storedToken() {
+  // Observatory and the floor plan register this hook. When it exists it is
+  // the only source, so an in-memory token is visible and a cleared session
+  // does not fall through to a saved dashboard token the operator just ignored.
+  try {
+    if (typeof globalThis.__ruviewGetToken === 'function') {
+      return globalThis.__ruviewGetToken() || null;
+    }
+  } catch { /* hook unavailable */ }
   try {
     return localStorage.getItem(API_TOKEN_STORAGE_KEY) || null;
   } catch {

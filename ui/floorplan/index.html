@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>RuView floor plan</title>
+  <link rel="stylesheet" href="floorplan.css">
+</head>
+<body>
+  <div class="app">
+    <header>
+      <div>
+        <h1>RuView floor plan</h1>
+        <p>Top-down layout you supply locally. Live sensing is read from this server only. Room occupancy is not measured.</p>
+      </div>
+      <nav class="links">
+        <a href="/ui/observatory-live.html">Live observatory</a>
+        <a href="/ui/observatory.html">Observatory route</a>
+      </nav>
+    </header>
+    <div class="toolbar">
+      <label class="file-button">Load plan<input id="plan-file" type="file" accept="application/json,.json"></label>
+      <button id="preview-synthetic" type="button">Preview synthetic geometry</button>
+      <label>Units
+        <select id="units">
+          <option value="file">From file</option>
+          <option value="m">Meters</option>
+          <option value="cm">Centimeters</option>
+          <option value="mm">Millimeters</option>
+        </select>
+      </label>
+      <label><input id="flip-y" type="checkbox"> Flip vertical</label>
+      <button id="zoom-in" type="button">Zoom in</button>
+      <button id="zoom-out" type="button">Zoom out</button>
+      <button id="fit" type="button">Reset view</button>
+      <label>Floor <select id="floor"></select></label>
+      <label><input id="remember-plan" type="checkbox"> Remember plan on this PC</label>
+      <button id="forget" type="button">Forget saved plan</button>
+    </div>
+    <div class="workspace">
+      <div class="stage">
+        <svg id="plan" role="img" aria-label="Floor plan"></svg>
+      </div>
+      <aside>
+        <div id="link-status" class="status">
+          <strong>Sensing</strong>
+          <span id="link-text">Waiting for this server.</span>
+        </div>
+        <h2>Token</h2>
+        <p class="note">Used only as an Authorization header to this origin. It is kept in this tab’s memory unless you check remember. A token already saved by the dashboard is used if one is present.</p>
+        <div class="token-row">
+          <input id="token" type="password" autocomplete="off" spellcheck="false" placeholder="Paste token">
+          <button id="use-token" type="button">Use</button>
+        </div>
+        <div class="token-row">
+          <label class="file-button">Token file<input id="token-file" type="file" accept=".txt,text/plain"></label>
+          <button id="clear-token" type="button">Clear</button>
+        </div>
+        <label class="check-row"><input id="remember" type="checkbox"> Remember in this browser</label>
+        <p id="token-source" class="note"></p>
+        <div id="plan-error" class="banner" hidden></div>
+        <ul id="warnings" class="warn-list"></ul>
+        <h2>Server estimate</h2>
+        <p id="inference" class="note">No server estimate yet. This is not a per-room measurement.</p>
+        <h2>Stream</h2>
+        <p id="stream" class="note">No stream status yet.</p>
+        <h2>Nodes</h2>
+        <div id="nodes"></div>
+        <p class="disclaimer">Dimensions are approximate. Wi-Fi sensing is not camera-grade. Markers are placed by hand. Unplaced nodes are not given a guessed room.</p>
+        <p class="note">MIT License. Copyright (c) 2024 rUv.</p>
+      </aside>
+    </div>
+  </div>
+  <script type="module" src="./floorplan.mjs"></script>
+</body>
+</html>
