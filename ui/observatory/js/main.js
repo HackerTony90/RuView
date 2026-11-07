@@ -8,7 +8,17 @@
  * - Dot-matrix mist body mass, particle trails, WiFi waves, signal field
  * - Reflective floor, settings dialog, and practical data HUD
  */
-import { withWsTicket } from '../../services/ws-ticket.js';
+import {
+  demoOptIn,
+  installTokenHook,
+  selectObservatoryFrame,
+  prepareSameOriginTicket,
+  isSameOriginSensingWs,
+  sameOriginSensingWs,
+  getToken,
+  serverEstimateView,
+  mountObservatoryDock,
+} from '../../live-session.mjs';
 import * as THREE from 'three';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 
@@ -128,15 +138,32 @@ class Observatory {
     this._showFps = false;
     this._qualityLevel = 2;
 
-    // WebSocket for live data — always try auto-detect on startup
+    // Live link. Demo frames run only for an explicit ?demo=1 URL.
     this._ws = null;
     this._liveData = null;
-    this._autoDetectLive();
+    this._socketOpened = false;
+    this._link = 'starting';
+    this._reconnectTimer = null;
+    installTokenHook();
+    this._dock = mountObservatoryDock({ onTokenChanged: () => this._startLive() });
+    this._demoExplicit = demoOptIn(window.location.search);
+    this._startLive();
 
     // Input
     this._initKeyboard();
     this._hud.initSettings();
     this._hud.initQuickSelect();
+    const sourceSelect = document.getElementById('opt-data-source');
+    if (sourceSelect && !this._demoExplicit) {
+      sourceSelect.value = 'ws';
+      sourceSelect.addEventListener('change', (event) => {
+        if (event.target.value !== 'ws') {
+          event.target.value = 'ws';
+          this._startLive();
+        }
+      });
+    }
+    this._restTimer = setInterval(() => { void this._pollRest(); }, 2000);
     window.addEventListener('resize', () => this._onResize());
 
     // Start
@@ -436,68 +463,156 @@ class Observatory {
 
   // ---- WebSocket live data ----
 
-  _autoDetectLive() {
-    // Probe sensing server health on same origin, then common ports
-    const host = window.location.hostname || 'localhost';
-    const candidates = [
-      window.location.origin,                   // same origin (e.g. :3000)
-      `http://${host}:8765`,                     // default WS port
-      `http://${host}:3000`,                     // default HTTP port
-    ];
-    // Deduplicate
-    const unique = [...new Set(candidates)];
-
-    const tryNext = (i) => {
-      if (i >= unique.length) {
-        console.log('[Observatory] No sensing server detected, using demo mode');
-        return;
-      }
-      const base = unique[i];
-      fetch(`${base}/health`, { signal: AbortSignal.timeout(1500) })
-        .then(r => r.ok ? r.json() : Promise.reject())
-        .then(data => {
-          if (data && data.status === 'ok') {
-            const wsProto = base.startsWith('https') ? 'wss:' : 'ws:';
-            const urlObj = new URL(base);
-            const wsUrl = `${wsProto}//${urlObj.host}/ws/sensing`;
-            console.log('[Observatory] Sensing server detected at', base, '→', wsUrl);
-            this.settings.dataSource = 'ws';
-            this.settings.wsUrl = wsUrl;
-            void this._connectWS(wsUrl);
-          } else {
-            tryNext(i + 1);
-          }
-        })
-        .catch(() => tryNext(i + 1));
-    };
-    tryNext(0);
+  _startLive() {
+    if (this._demoExplicit) {
+      this._link = 'demo';
+      this.settings.dataSource = 'demo';
+      this._dock?.setStatus('demo', 'Explicit demo (?demo=1). These figures are synthetic and are not live sensing.');
+      return;
+    }
+    this.settings.dataSource = 'ws';
+    this.settings.wsUrl = sameOriginSensingWs(window.location) || '';
+    void this._pollRest();
+    void this._connectWS(this.settings.wsUrl);
   }
 
-  // async: `/ws/sensing` is gated (ADR-272); mint a single-use ticket first.
-  async _connectWS(url) {
-    this._disconnectWS();
-    let wsUrl = url;
-    try { wsUrl = await withWsTicket(url); } catch { /* auth off or pre-ADR-272 server */ }
+  async _pollRest() {
+    if (this._demoExplicit || location.protocol === 'file:') return;
+    const headers = { Accept: 'application/json' };
+    const token = getToken();
+    if (token) headers.Authorization = `Bearer ${token}`;
     try {
-      this._ws = new WebSocket(wsUrl);
+      const response = await fetch('/api/v1/nodes', {
+        headers, credentials: 'same-origin', cache: 'no-store',
+      });
+      if (response.status === 401 || response.status === 403) {
+        this._link = 'auth-required';
+        this._dock?.setStatus('auth-required', response.status === 401
+          ? 'The server requires a token (HTTP 401). Enter it here or choose a one-line token file. Demo figures stay off.'
+          : 'The server rejected the token (HTTP 403). Demo figures stay off.');
+        this._dock?.setNodes('');
+        return;
+      }
+      if (!response.ok) {
+        this._link = 'offline';
+        this._dock?.setStatus('offline', `Node status returned HTTP ${response.status}.`);
+        return;
+      }
+      const body = await response.json();
+      const nodes = Array.isArray(body.nodes) ? body.nodes : [];
+      const summary = nodes.map((node) => {
+        const id = node.node_id ?? node.id;
+        const freshness = node.status || 'unknown';
+        const rssi = Number.isFinite(node.rssi_dbm) ? `${Math.round(node.rssi_dbm)} dBm` : 'no RSSI';
+        return `Node ${id}: ${freshness}, ${rssi}`;
+      }).join(' · ');
+      this._dock?.setNodes(summary || 'The server returned no nodes.');
+      if (this._link !== 'live') {
+        this._link = 'no-data';
+        this._dock?.setStatus('no-data', nodes.length
+          ? 'The API answered with nodes. People are not drawn until a surveyed map exists, and this view does not invent them.'
+          : 'The API answered and listed no nodes. Demo figures stay off.');
+      }
+    } catch {
+      if (this._link !== 'live') {
+        this._link = 'offline';
+        this._dock?.setStatus('offline', 'The sensing API is unreachable. Demo figures stay off.');
+      }
+    }
+  }
+
+  // Same-origin socket only. A missing or rejected token does not fall back to demo.
+  async _connectWS(url) {
+    if (this._demoExplicit) return;
+    this._disconnectWS();
+    if (!isSameOriginSensingWs(url, window.location)) {
+      this._link = 'offline';
+      this._dock?.setStatus('offline', 'The live stream is opened on this page’s origin only.');
+      return;
+    }
+    const prepared = await prepareSameOriginTicket({ locationLike: window.location });
+    if (!prepared.ok) {
+      this._link = prepared.auth === 'missing' || prepared.auth === 'rejected' ? 'auth-required' : 'offline';
+      this._dock?.setStatus(this._link, prepared.error || 'The live stream is not connected.');
+      if (prepared.auth === 'offline') this._scheduleReconnect(url);
+      return;
+    }
+    try {
+      this._socketOpened = false;
+      this._ws = new WebSocket(prepared.url);
       this._ws.onopen = () => {
-        console.log('[Observatory] WebSocket connected');
+        this._socketOpened = true;
+        this._link = 'live';
         this._hud.updateSourceBadge('ws', this._ws);
+        this._dock?.setStatus('live', 'Live stream connected. Figures are not drawn: server positions are uncalibrated inference, not a measured location.');
       };
-      this._ws.onmessage = (evt) => { try { this._liveData = JSON.parse(evt.data); } catch {} };
+      this._ws.onmessage = (evt) => {
+        try { this._liveData = JSON.parse(evt.data); } catch { /* ignore malformed frames */ }
+      };
       this._ws.onclose = () => {
-        console.log('[Observatory] WebSocket closed, falling back to demo');
+        const opened = this._socketOpened;
         this._ws = null;
-        this.settings.dataSource = 'demo';
-        this._hud.updateSourceBadge('demo', null);
+        this._liveData = null;
+        this._socketOpened = false;
+        if (!opened) {
+          this._link = 'auth-required';
+          this._dock?.setStatus('auth-required', 'The live stream closed before it opened. If a token is required, enter it above. Demo figures stay off.');
+        } else {
+          this._link = 'offline';
+          this._dock?.setStatus('offline', 'The live stream closed. Demo figures stay off.');
+        }
+        this._setBadge(this._link === 'auth-required' ? 'AUTH REQUIRED' : 'OFFLINE');
+        this._scheduleReconnect(url);
       };
       this._ws.onerror = () => {};
-    } catch {}
+    } catch {
+      this._link = 'offline';
+      this._dock?.setStatus('offline', 'The browser could not open the live stream.');
+    }
+  }
+
+  _scheduleReconnect(url) {
+    clearTimeout(this._reconnectTimer);
+    this._reconnectTimer = setTimeout(() => {
+      if (!this._demoExplicit) void this._connectWS(url);
+    }, 4000);
   }
 
   _disconnectWS() {
-    if (this._ws) { this._ws.close(); this._ws = null; }
+    if (this._ws) {
+      this._ws.onclose = null;
+      this._ws.close();
+      this._ws = null;
+    }
     this._liveData = null;
+    this._socketOpened = false;
+  }
+
+  _setBadge(text) {
+    const label = document.getElementById('data-source-label');
+    const dot = document.querySelector('#data-source-badge .dot');
+    if (label) label.textContent = text;
+    if (dot) dot.className = text === 'LIVE' ? 'dot dot--live' : 'dot dot--demo';
+  }
+
+  _showQuiet(mode) {
+    const badge = mode === 'auth-required'
+      ? 'AUTH REQUIRED'
+      : mode === 'offline'
+        ? 'OFFLINE'
+        : mode === 'live'
+          ? 'LIVE'
+          : 'NO DATA';
+    const label = mode === 'live' ? 'NO DATA' : badge;
+    this._setBadge(badge);
+    for (const id of ['hr-value', 'br-value', 'conf-value', 'rssi-value', 'var-value', 'motion-value']) {
+      const el = document.getElementById(id);
+      if (el) el.textContent = '--';
+    }
+    const presence = document.getElementById('presence-label');
+    if (presence) presence.textContent = label;
+    const persons = document.getElementById('persons-value');
+    if (persons) persons.textContent = '--';
   }
 
   // ========================================
@@ -509,24 +624,57 @@ class Observatory {
     const dt = Math.min(this._clock.getDelta(), 0.1);
     const elapsed = this._clock.getElapsedTime();
 
-    // Data source
-    if (this.settings.dataSource === 'ws' && this._liveData) {
-      this._currentData = this._liveData;
+    const decision = selectObservatoryFrame({
+      demoRequested: this._demoExplicit,
+      liveFrame: this._liveData,
+      link: this._link,
+    });
+    let data;
+    if (decision.useDemoGenerator) {
+      data = this._demoData.update(dt);
+      this._hud.updateSourceBadge('demo', null);
+    } else if (decision.hud === 'server' && decision.serverFrame) {
+      const estimate = serverEstimateView(decision.serverFrame) || {};
+      data = {
+        classification: estimate.classification || {},
+        features: {
+          mean_rssi: estimate.features?.mean_rssi,
+          variance: estimate.features?.variance,
+          motion_band_power: estimate.features?.motion_band_power,
+        },
+        vital_signs: estimate.vitalSigns
+          ? {
+              heart_rate_bpm: estimate.vitalSigns.heart_rate_bpm,
+              breathing_rate_bpm: estimate.vitalSigns.breathing_rate_bpm,
+            }
+          : {},
+        estimated_persons: estimate.estimatedPersons,
+        persons: [],
+        source: estimate.source,
+      };
+      this._hud.updateSourceBadge('ws', this._ws);
     } else {
-      this._currentData = this._demoData.update(dt);
+      data = { persons: [], classification: {}, features: {}, vital_signs: {} };
     }
-    const data = this._currentData;
+    this._currentData = data;
 
-    // Updates
+    // Updates. Figures and the signal field stay off unless demo was requested.
     this._nebula.update(dt, elapsed);
-    this._figurePool.update(data, elapsed);
-    this._scenarioProps.update(data, this._demoData.currentScenario);
-    this._updateDotMatrixMist(data, elapsed);
-    this._updateParticleTrail(data, dt, elapsed);
+    this._figurePool.update(decision.drawFigures ? data : { persons: [] }, elapsed);
+    this._scenarioProps.update(
+      decision.useDemoGenerator ? data : { classification: {} },
+      decision.useDemoGenerator ? this._demoData.currentScenario : 'live',
+    );
+    this._updateDotMatrixMist(decision.drawFigures ? data : { persons: [] }, elapsed);
+    this._updateParticleTrail(decision.drawFigures ? data : { persons: [] }, dt, elapsed);
     this._updateWifiWaves(elapsed);
-    this._updateSignalField(data);
-    this._hud.updateHUD(data, this._demoData);
-    this._hud.updateSparkline(data);
+    if (decision.drawSignalField) this._updateSignalField(data);
+    if (decision.hud === 'quiet') {
+      this._showQuiet(decision.mode);
+    } else {
+      this._hud.updateHUD(data, this._demoData);
+      this._hud.updateSparkline(decision.useDemoGenerator ? data : null);
+    }
 
     // Router LED
     this._routerLed.material.opacity = 0.5 + 0.5 * Math.sin(elapsed * 8);

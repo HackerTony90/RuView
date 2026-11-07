@@ -53,6 +53,16 @@ const [,, command, ...args] = process.argv;
 // Get prompt from environment variable (set by Claude Code hooks)
 const prompt = process.env.PROMPT || process.env.TOOL_INPUT_command || args.join(' ') || '';
 
+function denyPreBash(message) {
+  process.stdout.write(JSON.stringify({
+    permission: 'deny',
+    user_message: message,
+    agent_message: message,
+  }) + '\n');
+  // Exit 2 is the documented deny. Other non-zero codes fail open.
+  process.exit(2);
+}
+
 const handlers = {
   'route': () => {
     // Inject ranked intelligence context before routing
@@ -105,16 +115,46 @@ const handlers = {
   },
 
   'pre-bash': () => {
-    // Basic command safety check
-    const cmd = prompt.toLowerCase();
-    const dangerous = ['rm -rf /', 'format c:', 'del /s /q c:\\', ':(){:|:&};:'];
-    for (const d of dangerous) {
-      if (cmd.includes(d)) {
-        console.error(`[BLOCKED] Dangerous command detected: ${d}`);
-        process.exit(1);
+    // Cursor preToolUse sends the command as JSON on stdin
+    // (tool_input.command) and requires a JSON permission object on
+    // stdout. https://cursor.com/docs/hooks
+    // The same four substrings decide allow vs deny.
+    const sources = [];
+    if (process.env.PROMPT) sources.push(process.env.PROMPT);
+    if (process.env.TOOL_INPUT_command) sources.push(process.env.TOOL_INPUT_command);
+    if (args.length) sources.push(args.join(' '));
+    if (!process.stdin.isTTY) {
+      let raw = '';
+      try {
+        raw = fs.readFileSync(0, 'utf8');
+      } catch (e) {
+        denyPreBash('Hook input could not be read.');
+      }
+      if (raw.trim()) {
+        let parsed;
+        try {
+          parsed = JSON.parse(raw);
+        } catch (e) {
+          denyPreBash('Hook input was not valid JSON.');
+        }
+        if (!parsed || typeof parsed !== 'object') {
+          denyPreBash('Hook input was not a JSON object.');
+        }
+        if (typeof parsed.command === 'string') sources.push(parsed.command);
+        const toolInput = parsed.tool_input;
+        if (toolInput && typeof toolInput === 'object' && typeof toolInput.command === 'string') {
+          sources.push(toolInput.command);
+        } else if (typeof toolInput === 'string') {
+          sources.push(toolInput);
+        }
       }
     }
-    console.log('[OK] Command validated');
+    const cmd = sources.join('\n').toLowerCase();
+    const dangerous = ['rm -rf /', 'format c:', 'del /s /q c:\\', ':(){:|:&};:'];
+    for (const d of dangerous) {
+      if (cmd.includes(d)) denyPreBash(`[BLOCKED] Dangerous command detected: ${d}`);
+    }
+    process.stdout.write(JSON.stringify({ permission: 'allow' }) + '\n');
   },
 
   'post-edit': () => {

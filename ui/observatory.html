@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>RuView Observatory — WiFi DensePose</title>
+  <title>RuView Observatory — Live</title>
   <link rel="stylesheet" href="observatory/css/observatory.css">
 </head>
 <body>
@@ -15,14 +15,14 @@
     <!-- Top-left: Branding -->
     <div id="brand">
       <div id="brand-logo"><span class="pi">&pi;</span> RuView</div>
-      <div id="brand-tagline">WiFi DensePose Sensing Observatory</div>
+      <div id="brand-tagline">Live sensing. The stage is not a measured floor plan. <a href="/ui/floorplan/index.html">Floor plan</a></div>
     </div>
 
     <!-- Top-right: Connection + status + gear -->
     <div id="status-bar">
       <div id="data-source-badge">
         <span class="dot dot--demo"></span>
-        <span id="data-source-label">DEMO</span>
+        <span id="data-source-label">NO DATA</span>
       </div>
       <div id="scenario-area">
         <span id="autoplay-icon" title="Auto-cycling">&#9654;</span>
@@ -100,7 +100,7 @@
 
       <div class="panel-header" style="margin-top:12px">Presence</div>
       <div id="presence-indicator" class="presence-state presence--absent">
-        <span id="presence-label">ABSENT</span>
+        <span id="presence-label">NO DATA</span>
       </div>
       <div id="fall-alert" class="fall-alert" style="display:none">FALL DETECTED</div>
     </div>
@@ -310,8 +310,8 @@
         <label class="setting-row">
           <span>Data Source</span>
           <select id="opt-data-source">
-            <option value="demo" selected>Demo Generator</option>
-            <option value="ws">Live WebSocket</option>
+            <option value="demo">Demo Generator</option>
+            <option value="ws" selected>Live WebSocket</option>
           </select>
         </label>
         <label class="setting-row" id="ws-url-row" style="display:none">
@@ -335,6 +335,6 @@
   }
   </script>
 
-  <script type="module" src="observatory/js/main.js"></script>
+  <script type="module" src="observatory/js/live-main.js"></script>
 </body>
 </html>

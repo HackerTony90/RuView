@@ -1,0 +1,75 @@
+{
+  "building": {
+    "version": 1,
+    "name": "Synthetic example",
+    "floors": [
+      {
+        "id": "level-1",
+        "name": "Level 1",
+        "elevation": 0,
+        "height": 2.5,
+        "cut_height": 1.2,
+        "rooms": [
+          {
+            "id": "room-a",
+            "name": "Room A",
+            "area_id": "area-a",
+            "floor_material": "generic",
+            "climate": "unspecified",
+            "points": [[0, 0], [4, 0], [4, 3], [0, 3]],
+            "ignored_private_note": "not-rendered"
+          },
+          {
+            "id": "room-b",
+            "name": "Room B",
+            "area_id": "area-b",
+            "floor_material": "generic",
+            "climate": "unspecified",
+            "points": [[4, 0], [7.5, 0], [7.5, 3], [4, 3]]
+          },
+          {
+            "id": "hall",
+            "name": "Hall",
+            "area_id": "area-hall",
+            "points": [[0, 3], [7.5, 3], [7.5, 4.4], [0, 4.4]]
+          }
+        ],
+        "doors": [
+          { "id": "door-ab", "at": [4, 1.5], "width": 0.9, "height": 2.0 },
+          { "id": "door-hall", "at": [2, 3], "width": 0.8 }
+        ],
+        "windows": [
+          { "id": "window-a", "at": [2, 0], "width": 1.4, "height": 1.2, "sill": 0.9 }
+        ],
+        "openings": [
+          { "id": "opening-hall", "at": [6, 3], "width": 1.2, "type": "opening" }
+        ],
+        "walls": [
+          { "from": [5.5, 3.4], "to": [5.5, 4.2], "thickness": 0.08 }
+        ],
+        "furniture": [
+          { "name": "Table", "type": "table", "at": [2, 1.6], "width": 1.2, "depth": 0.7, "rotation": 0 }
+        ]
+      },
+      {
+        "id": "level-2",
+        "name": "Level 2",
+        "elevation": 2.8,
+        "height": 2.4,
+        "cut_height": 1.2,
+        "rooms": [
+          {
+            "id": "room-c",
+            "name": "Room C",
+            "area_id": "area-c",
+            "points": [[0, 0], [5, 0], [5, 4], [0, 4]]
+          }
+        ],
+        "windows": [
+          { "at": [2.5, 0], "width": 1.2, "type": "window" }
+        ]
+      }
+    ]
+  },
+  "editor_only": { "kept": false }
+}
